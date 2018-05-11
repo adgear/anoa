@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.avro.file.CodecFactory;
 
 /**
  * A Runnable for concatenating Avro record batches parser multiple input streams.
@@ -67,8 +68,13 @@ public class AvroConcatenator implements Runnable {
       Function<InputStream, DataFileStream<GenericRecord>> builder = Unchecked.function(
           stream -> new DataFileStream<>(stream, new GenericDatumReader<>(schema)));
 
-      try (DataFileWriter<GenericRecord> writer = new DataFileWriter<>(
-          new GenericDatumWriter<GenericRecord>(schema))
+      final DataFileWriter<GenericRecord> dfw = new DataFileWriter<>(
+        new GenericDatumWriter<>(schema)
+      );
+      dfw.setCodec(CodecFactory.deflateCodec(6));
+      dfw.setSyncInterval(1048576);
+
+      try (DataFileWriter<GenericRecord> writer = dfw
           .create(schema, outputStream)) {
         writer.appendAllFrom(dfs0, true);
         inputStreams.stream().skip(1).sequential()
