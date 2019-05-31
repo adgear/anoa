@@ -1,0 +1,98 @@
+# instance:       concourse.int.adgear.com
+# pipeline_name:  anoa
+# team:           data
+---
+resource_types:
+  - name: git-tags-resource
+    type: docker-image
+    source:
+      repository: adgear/git-tags-resource
+      tag: 1.1.2
+  - name: pull-request
+    type: docker-image
+    source:
+      repository: teliaoss/github-pr-resource
+  - name: commit-status
+    type: docker-image
+    source:
+      repository: dpb587/github-status-resource
+      tag: master
+
+resources:
+  - name: common-tasks-repo
+    type: git
+    source:
+      uri: git@github.com:adgear/common-tasks.git
+      private_key: ((adgear-concourse.ssh_private_key))
+  - name: anoa-pr
+    type: pull-request
+    source:
+      repository: adgear/anoa
+      access_token: ((adgear-concourse.access_token))
+  - name: anoa-tags
+    type: git-tags-resource
+    source:
+      private_key: ((adgear-concourse.ssh_private_key))
+      repository_name: adgear/anoa
+      uri: git@github.com:adgear/anoa.git
+      tag_filter: "*.*.*"
+  - name: anoa-commit-status
+    type: commit-status
+    source:
+      repository:   adgear/anoa
+      access_token: ((adgear-concourse.access_token))
+      context: concourse/ci
+
+jobs:
+  - name: build-pr
+    plan:
+      - aggregate:
+        - get: common-tasks-repo
+        - get: anoa-pr
+          trigger: true
+          version: every
+      - put: anoa-pr
+        params:
+          path:   anoa-pr
+          status: pending
+      - task: mvn-build
+        file: common-tasks-repo/mvn-build/latest/mvn-build.yml
+        input_mapping:
+          source: anoa-pr
+        params: { EXPORT_VOLUMES: false }
+        on_success:
+          put: anoa-pr
+          params:
+            path:   anoa-pr
+            status: success
+        on_failure:
+          put: anoa-pr
+          params:
+            path:   anoa-pr
+            status: failure
+
+  - name: build-tags
+    plan:
+      - aggregate:
+        - get: common-tasks-repo
+        - get: anoa-tags
+          trigger: true
+          version: every
+      - do:
+        - task: mvn-build
+          file: common-tasks-repo/mvn-build/latest/mvn-build.yml
+          input_mapping:
+            source: anoa-tags
+          params:
+            IS_RELEASE: true
+            EXPORT_VOLUMES: false
+        on_success:
+          put: anoa-commit-status
+          params:
+            state:  success
+            commit: anoa-tags
+        on_failure:
+          put: anoa-commit-status
+          params:
+            state:  failure
+            commit: anoa-tags
